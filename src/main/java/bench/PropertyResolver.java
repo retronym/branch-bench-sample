@@ -5,7 +5,8 @@ import java.util.Map;
 /**
  * Resolves ${key} placeholders in strings by looking up values in a property map.
  *
- * Optimized: single-pass scan with StringBuilder, no regex allocation.
+ * Micro-opt: convert input to char[] once upfront to avoid repeated charAt()
+ * bounds-check overhead on every character access.
  */
 public class PropertyResolver {
 
@@ -16,12 +17,13 @@ public class PropertyResolver {
     }
 
     public String resolve(String input) {
-        StringBuilder sb = new StringBuilder(input.length());
+        char[] chars = input.toCharArray();
+        StringBuilder sb = new StringBuilder(chars.length);
         int i = 0;
-        while (i < input.length()) {
-            if (input.charAt(i) == '$'
-                    && i + 1 < input.length()
-                    && input.charAt(i + 1) == '{') {
+        while (i < chars.length) {
+            if (chars[i] == '$'
+                    && i + 1 < chars.length
+                    && chars[i + 1] == '{') {
                 int end = input.indexOf('}', i + 2);
                 if (end > i + 2) {
                     String key = input.substring(i + 2, end);
@@ -33,7 +35,7 @@ public class PropertyResolver {
                     }
                 }
             }
-            sb.append(input.charAt(i++));
+            sb.append(chars[i++]);
         }
         return sb.toString();
     }
