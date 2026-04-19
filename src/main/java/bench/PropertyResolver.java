@@ -1,12 +1,11 @@
 package bench;
 
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Resolves ${key} placeholders in strings by looking up values in a property map.
  *
- * Baseline: compiles a new Pattern for every property on every call.
+ * Optimized: single-pass scan with StringBuilder, no regex allocation.
  */
 public class PropertyResolver {
 
@@ -17,11 +16,25 @@ public class PropertyResolver {
     }
 
     public String resolve(String input) {
-        String result = input;
-        for (Map.Entry<String, String> entry : properties.entrySet()) {
-            Pattern pattern = Pattern.compile("\\$\\{" + Pattern.quote(entry.getKey()) + "\\}");
-            result = pattern.matcher(result).replaceAll(entry.getValue());
+        StringBuilder sb = new StringBuilder(input.length());
+        int i = 0;
+        while (i < input.length()) {
+            if (input.charAt(i) == '$'
+                    && i + 1 < input.length()
+                    && input.charAt(i + 1) == '{') {
+                int end = input.indexOf('}', i + 2);
+                if (end > i + 2) {
+                    String key = input.substring(i + 2, end);
+                    String value = properties.get(key);
+                    if (value != null) {
+                        sb.append(value);
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+            sb.append(input.charAt(i++));
         }
-        return result;
+        return sb.toString();
     }
 }
