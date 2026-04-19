@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>branch-bench report</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js" crossorigin="anonymous"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
+  h1 { padding: 1rem 2rem; margin: 0; font-size: 1.2rem; background: #161b22; border-bottom: 1px solid #30363d; }
+  .section { padding: 0.75rem 2rem 0.25rem; font-size: 0.75rem; color: #8b949e; letter-spacing: 0.08em; text-transform: uppercase; }
+  .charts { display: flex; flex-wrap: wrap; gap: 1rem; padding: 0.5rem 2rem 1rem; }
+  .chart-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; flex: 1 1 600px; min-width: 0; }
+  .chart-title { font-size: 0.78rem; margin: 0 0 0.5rem; color: #8b949e; word-break: break-all; font-family: monospace; }
+  table { width: calc(100% - 4rem); margin: 0 2rem 2rem; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { text-align: left; padding: 0.45rem 0.75rem; border-bottom: 1px solid #21262d; vertical-align: top; }
+  th { background: #161b22; color: #8b949e; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+  tr.commit-row td { background: #0d1117; font-weight: 600; cursor: pointer; }
+  tr.commit-row:hover td { background: #161b22; }
+  tr.commit-row.pending td { color: #484f58; font-weight: 400; }
+  tr.run-row td { background: #0d1117; padding: 0.6rem 0.75rem 0.6rem 2rem; font-size: 0.78rem; }
+  tr.run-row.hidden { display: none; }
+  .run-meta { color: #8b949e; margin-bottom: 0.4rem; }
+  .cmd { font-family: monospace; font-size: 0.72rem; color: #58a6ff; word-break: break-all; margin: 0.2rem 0; }
+  .pass { color: #3fb950; font-weight: 600; }
+  .fail { color: #f85149; font-weight: 600; }
+  .na { color: #484f58; }
+  .score { font-family: monospace; font-size: 0.82rem; white-space: nowrap; }
+  .score-err { color: #8b949e; font-size: 0.75rem; }
+  .score-unit { color: #8b949e; font-size: 0.75rem; margin-left: 0.2rem; }
+  .toggle { font-size: 0.7rem; color: #388bfd; margin-left: 0.5rem; cursor: pointer; }
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  details { margin-top: 0.4rem; }
+  summary {
+    cursor: pointer; font-size: 0.72rem; color: #8b949e;
+    list-style: none; display: flex; align-items: center; gap: 0.3rem;
+  }
+  summary::before { content: '▶'; font-size: 0.6rem; }
+  details[open] summary::before { content: '▼'; }
+  .mode-bar { padding: 0.25rem 2rem 0.5rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .mode-label { font-size: 0.72rem; color: #8b949e; margin-right: 0.1rem; }
+  .mode-sep { color: #30363d; margin: 0 0.3rem; }
+  .mode-btn {
+    background: #21262d; border: 1px solid #30363d; color: #8b949e;
+    border-radius: 4px; padding: 0.2rem 0.7rem; font-size: 0.72rem; cursor: pointer;
+  }
+  .mode-btn.active { background: #388bfd22; border-color: #388bfd; color: #e6edf3; }
+  .mode-btn:hover { border-color: #8b949e; }
+  #runs-mode {
+    background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+    border-radius: 4px; padding: 0.2rem 0.5rem; font-size: 0.72rem; cursor: pointer;
+  }
+  #runs-mode:focus { outline: none; border-color: #388bfd; }
+  #toast {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    background: #388bfd; color: #fff; padding: 0.4rem 1rem; border-radius: 6px;
+    font-size: 0.8rem; font-family: monospace; opacity: 0; pointer-events: none;
+    transition: opacity 0.15s;
+  }
+  #toast.show { opacity: 1; }
+  pre.output {
+    margin: 0.4rem 0 0;
+    padding: 0.6rem 0.75rem;
+    background: #010409;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 400px;
+    overflow-y: auto;
+    color: #c9d1d9;
+  }
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<h1>branch-bench report</h1>
+
+<div class="section">Benchmark trends</div>
+<div class="mode-bar">
+  <span class="mode-label">runs:</span>
+  <select id="runs-mode" onchange="setRunsMode(this.value)">
+    <option value="latest">Latest</option>
+    <option value="all">All</option>
+    <option value="aggregate">Aggregate</option>
+  </select>
+  <span class="mode-sep">│</span>
+  <span class="mode-label">error bars:</span>
+  <button class="mode-btn active" data-mode="mean" onclick="setChartMode('mean')" >mean ± CI</button>
+  <button class="mode-btn"        data-mode="min"  onclick="setChartMode('min')"  >min</button>
+  <button class="mode-btn"        data-mode="max"  onclick="setChartMode('max')"  >max</button>
+  <button class="mode-btn"        data-mode="raw"  onclick="setChartMode('raw')"  >raw points</button>
+</div>
+<div class="charts" id="charts"></div>
+
+<div class="section">Commits</div>
+<table>
+  <thead>
+    <tr>
+      <th>Commit</th>
+      <th>Message</th>
+      <th>Date</th>
+      <th>Test</th>
+      <th>Benchmark</th>
+      <th>Runs</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+
+<script>
+const benchData = {"bench.PropertyResolverBenchmark.resolveTemplates": {"unit": "us/op", "mode": "avgt", "points": [{"x": "Integrate benchmarks: baseline property ", "y": 5.521511839684391, "error": 0.340595115150417, "raw": [5.678777622717411, 5.497372214503725, 5.471793029105282, 5.475997056880293, 5.483619275215242], "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "short_sha": "12fda9fc", "run_index": 0, "sha": "12fda9fca8aaecf0c87f1bc374432e56738af2ce"}, {"x": "Optimize resolver: StringBuilder with ma", "y": 0.8553179726693104, "error": 0.01811306793486173, "raw": [0.856789093515801, 0.850923998632353, 0.8502874317116014, 0.8570473214125657, 0.8615420180742307], "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "short_sha": "733a0f26", "run_index": 0, "sha": "733a0f260d3aa356a81e7e150ef5e1d6c9c492b1"}, {"x": "Micro-opt: scan over char[] to reduce ch", "y": 0.6430672728786944, "error": 0.09565356737394094, "raw": [0.6218600899352741, 0.6419938215823507, 0.6851857026268009, 0.6379784195021498, 0.6283183307468962], "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "short_sha": "5131839b", "run_index": 0, "sha": "5131839b8b398f3e536343ef4d853fecd91a74b2"}, {"x": "Docs: add complexity comment to resolve(", "y": 0.6353597250326037, "error": 0.013574725207737748, "raw": [0.6378775532507702, 0.6341754435446897, 0.6314070109732165, 0.6400542295987736, 0.633284387795569], "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "short_sha": "822b99df", "run_index": 0, "sha": "822b99df0c728865b24bad795dab0f57a2dfd62a"}, {"x": "Refactor: simplify resolve() to plain st", "y": 1.1512244251644908, "error": 0.017785633524740805, "raw": [1.1550240933372435, 1.1572389876565954, 1.1492042055989238, 1.1469607436153002, 1.1476940956143906], "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "short_sha": "557f8cd9", "run_index": 0, "sha": "557f8cd997f1efd2c250c9dcc12bdff4bb99dd3c"}]}};
+const commits = [{"sha": "12fda9fca8aaecf0c87f1bc374432e56738af2ce", "short_sha": "12fda9fc", "message": "Integrate benchmarks: baseline property resolution using regex", "author": "branch-bench@example.com", "ts": "2026-04-19 10:43", "runs": [{"run_index": 1, "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "test_cmd": "", "test": null, "bench_count": 1, "bench_output": "# JMH version: 1.37\n# VM version: JDK 26, OpenJDK 64-Bit Server VM, 26+35\n# VM invoker: /Users/jz/.sdkman/candidates/java/26-tem/bin/java\n# VM options: <none>\n# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)\n# Warmup: 3 iterations, 1 s each\n# Measurement: 5 iterations, 1 s each\n# Timeout: 10 min per iteration\n# Threads: 1 thread, will synchronize iterations\n# Benchmark mode: Average time, time/op\n# Benchmark: bench.PropertyResolverBenchmark.resolveTemplates\n\n# Run progress: 0.00% complete, ETA 00:00:08\n# Fork: 1 of 1\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n# Warmup Iteration   1: 7.967 us/op\n# Warmup Iteration   2: 5.564 us/op\n# Warmup Iteration   3: 5.487 us/op\nIteration   1: 5.679 us/op\nIteration   2: 5.497 us/op\nIteration   3: 5.472 us/op\nIteration   4: 5.476 us/op\nIteration   5: 5.484 us/op\n\n\nResult \"bench.PropertyResolverBenchmark.resolveTemplates\":\n  5.522 \u00b1(99.9%) 0.341 us/op [Average]\n  (min, avg, max) = (5.472, 5.522, 5.679), stdev = 0.088\n  CI (99.9%): [5.181, 5.862] (assumes normal distribution)\n\n\n# Run complete. Total time: 00:00:08\n\nREMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on\nwhy the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial\nexperiments, perform baseline and negative tests that provide experimental control, make sure\nthe benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.\nDo not assume the numbers tell you what you want them to tell.\n\nNOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise\nextra caution when trusting the results, look into the generated code to check the benchmark still\nworks, and factor in a small probability of new VM bugs. Additionally, while comparisons between\ndifferent JVMs are already problematic, the performance difference caused by different Blackhole\nmodes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.\n\nBenchmark                                   Mode  Cnt  Score   Error  Units\nPropertyResolverBenchmark.resolveTemplates  avgt    5  5.522 \u00b1 0.341  us/op\n\nBenchmark result is saved to /var/folders/22/g1sv634d11j1d_lqlnhz9p2r0000gn/T/tmpkn_9jprf.json\nWARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/jansi-2.4.1.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/guava-33.2.1-jre.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\nWARNING: Final field _cipher in class org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher has been mutated reflectively by class org.eclipse.sisu.bean.BeanPropertyField in unnamed module @6295d394 (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/org.eclipse.sisu.inject-0.9.0.M3.jar)\nWARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning\nWARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n", "jmh_json_path": "assets/12fda9fc-integrate-benchmarks-baseline-property-r/run-1/jmh-results.json", "reused_from_sha": "", "profiles": [], "scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "score": 5.521511839684391, "score_error": 0.340595115150417, "unit": "us/op", "raw_data": [5.678777622717411, 5.497372214503725, 5.471793029105282, 5.475997056880293, 5.483619275215242]}]}], "latest_test": null, "latest_scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "mode": "avgt", "score": 5.521511839684391, "score_error": 0.340595115150417, "unit": "us/op", "params": null, "raw_data": [5.678777622717411, 5.497372214503725, 5.471793029105282, 5.475997056880293, 5.483619275215242]}]}, {"sha": "733a0f260d3aa356a81e7e150ef5e1d6c9c492b1", "short_sha": "733a0f26", "message": "Optimize resolver: StringBuilder with manual char scanning", "author": "branch-bench@example.com", "ts": "2026-04-19 10:43", "runs": [{"run_index": 1, "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "test_cmd": "", "test": null, "bench_count": 1, "bench_output": "# JMH version: 1.37\n# VM version: JDK 26, OpenJDK 64-Bit Server VM, 26+35\n# VM invoker: /Users/jz/.sdkman/candidates/java/26-tem/bin/java\n# VM options: <none>\n# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)\n# Warmup: 3 iterations, 1 s each\n# Measurement: 5 iterations, 1 s each\n# Timeout: 10 min per iteration\n# Threads: 1 thread, will synchronize iterations\n# Benchmark mode: Average time, time/op\n# Benchmark: bench.PropertyResolverBenchmark.resolveTemplates\n\n# Run progress: 0.00% complete, ETA 00:00:08\n# Fork: 1 of 1\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n# Warmup Iteration   1: 0.855 us/op\n# Warmup Iteration   2: 0.845 us/op\n# Warmup Iteration   3: 0.852 us/op\nIteration   1: 0.857 us/op\nIteration   2: 0.851 us/op\nIteration   3: 0.850 us/op\nIteration   4: 0.857 us/op\nIteration   5: 0.862 us/op\n\n\nResult \"bench.PropertyResolverBenchmark.resolveTemplates\":\n  0.855 \u00b1(99.9%) 0.018 us/op [Average]\n  (min, avg, max) = (0.850, 0.855, 0.862), stdev = 0.005\n  CI (99.9%): [0.837, 0.873] (assumes normal distribution)\n\n\n# Run complete. Total time: 00:00:08\n\nREMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on\nwhy the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial\nexperiments, perform baseline and negative tests that provide experimental control, make sure\nthe benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.\nDo not assume the numbers tell you what you want them to tell.\n\nNOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise\nextra caution when trusting the results, look into the generated code to check the benchmark still\nworks, and factor in a small probability of new VM bugs. Additionally, while comparisons between\ndifferent JVMs are already problematic, the performance difference caused by different Blackhole\nmodes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.\n\nBenchmark                                   Mode  Cnt  Score   Error  Units\nPropertyResolverBenchmark.resolveTemplates  avgt    5  0.855 \u00b1 0.018  us/op\n\nBenchmark result is saved to /var/folders/22/g1sv634d11j1d_lqlnhz9p2r0000gn/T/tmpsulcbg0b.json\nWARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/jansi-2.4.1.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/guava-33.2.1-jre.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\nWARNING: Final field _cipher in class org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher has been mutated reflectively by class org.eclipse.sisu.bean.BeanPropertyField in unnamed module @657c8ad9 (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/org.eclipse.sisu.inject-0.9.0.M3.jar)\nWARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning\nWARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n", "jmh_json_path": "assets/733a0f26-optimize-resolver-stringbuilder-with-man/run-1/jmh-results.json", "reused_from_sha": "", "profiles": [], "scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "score": 0.8553179726693104, "score_error": 0.01811306793486173, "unit": "us/op", "raw_data": [0.856789093515801, 0.850923998632353, 0.8502874317116014, 0.8570473214125657, 0.8615420180742307]}]}], "latest_test": null, "latest_scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "mode": "avgt", "score": 0.8553179726693104, "score_error": 0.01811306793486173, "unit": "us/op", "params": null, "raw_data": [0.856789093515801, 0.850923998632353, 0.8502874317116014, 0.8570473214125657, 0.8615420180742307]}]}, {"sha": "5131839b8b398f3e536343ef4d853fecd91a74b2", "short_sha": "5131839b", "message": "Micro-opt: scan over char[] to reduce charAt() overhead", "author": "branch-bench@example.com", "ts": "2026-04-19 10:43", "runs": [{"run_index": 1, "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "test_cmd": "", "test": null, "bench_count": 1, "bench_output": "# JMH version: 1.37\n# VM version: JDK 26, OpenJDK 64-Bit Server VM, 26+35\n# VM invoker: /Users/jz/.sdkman/candidates/java/26-tem/bin/java\n# VM options: <none>\n# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)\n# Warmup: 3 iterations, 1 s each\n# Measurement: 5 iterations, 1 s each\n# Timeout: 10 min per iteration\n# Threads: 1 thread, will synchronize iterations\n# Benchmark mode: Average time, time/op\n# Benchmark: bench.PropertyResolverBenchmark.resolveTemplates\n\n# Run progress: 0.00% complete, ETA 00:00:08\n# Fork: 1 of 1\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n# Warmup Iteration   1: 0.708 us/op\n# Warmup Iteration   2: 0.680 us/op\n# Warmup Iteration   3: 0.633 us/op\nIteration   1: 0.622 us/op\nIteration   2: 0.642 us/op\nIteration   3: 0.685 us/op\nIteration   4: 0.638 us/op\nIteration   5: 0.628 us/op\n\n\nResult \"bench.PropertyResolverBenchmark.resolveTemplates\":\n  0.643 \u00b1(99.9%) 0.096 us/op [Average]\n  (min, avg, max) = (0.622, 0.643, 0.685), stdev = 0.025\n  CI (99.9%): [0.547, 0.739] (assumes normal distribution)\n\n\n# Run complete. Total time: 00:00:08\n\nREMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on\nwhy the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial\nexperiments, perform baseline and negative tests that provide experimental control, make sure\nthe benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.\nDo not assume the numbers tell you what you want them to tell.\n\nNOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise\nextra caution when trusting the results, look into the generated code to check the benchmark still\nworks, and factor in a small probability of new VM bugs. Additionally, while comparisons between\ndifferent JVMs are already problematic, the performance difference caused by different Blackhole\nmodes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.\n\nBenchmark                                   Mode  Cnt  Score   Error  Units\nPropertyResolverBenchmark.resolveTemplates  avgt    5  0.643 \u00b1 0.096  us/op\n\nBenchmark result is saved to /var/folders/22/g1sv634d11j1d_lqlnhz9p2r0000gn/T/tmpcsw_0lac.json\nWARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/jansi-2.4.1.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/guava-33.2.1-jre.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\nWARNING: Final field _cipher in class org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher has been mutated reflectively by class org.eclipse.sisu.bean.BeanPropertyField in unnamed module @78b1cc93 (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/org.eclipse.sisu.inject-0.9.0.M3.jar)\nWARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning\nWARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n", "jmh_json_path": "assets/5131839b-micro-opt-scan-over-char-to-reduce-chara/run-1/jmh-results.json", "reused_from_sha": "", "profiles": [], "scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "score": 0.6430672728786944, "score_error": 0.09565356737394094, "unit": "us/op", "raw_data": [0.6218600899352741, 0.6419938215823507, 0.6851857026268009, 0.6379784195021498, 0.6283183307468962]}]}], "latest_test": null, "latest_scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "mode": "avgt", "score": 0.6430672728786944, "score_error": 0.09565356737394094, "unit": "us/op", "params": null, "raw_data": [0.6218600899352741, 0.6419938215823507, 0.6851857026268009, 0.6379784195021498, 0.6283183307468962]}]}, {"sha": "822b99df0c728865b24bad795dab0f57a2dfd62a", "short_sha": "822b99df", "message": "Docs: add complexity comment to resolve() \u2014 no logic change", "author": "branch-bench@example.com", "ts": "2026-04-19 10:43", "runs": [{"run_index": 1, "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "test_cmd": "", "test": null, "bench_count": 1, "bench_output": "# JMH version: 1.37\n# VM version: JDK 26, OpenJDK 64-Bit Server VM, 26+35\n# VM invoker: /Users/jz/.sdkman/candidates/java/26-tem/bin/java\n# VM options: <none>\n# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)\n# Warmup: 3 iterations, 1 s each\n# Measurement: 5 iterations, 1 s each\n# Timeout: 10 min per iteration\n# Threads: 1 thread, will synchronize iterations\n# Benchmark mode: Average time, time/op\n# Benchmark: bench.PropertyResolverBenchmark.resolveTemplates\n\n# Run progress: 0.00% complete, ETA 00:00:08\n# Fork: 1 of 1\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n# Warmup Iteration   1: 0.822 us/op\n# Warmup Iteration   2: 0.667 us/op\n# Warmup Iteration   3: 0.631 us/op\nIteration   1: 0.638 us/op\nIteration   2: 0.634 us/op\nIteration   3: 0.631 us/op\nIteration   4: 0.640 us/op\nIteration   5: 0.633 us/op\n\n\nResult \"bench.PropertyResolverBenchmark.resolveTemplates\":\n  0.635 \u00b1(99.9%) 0.014 us/op [Average]\n  (min, avg, max) = (0.631, 0.635, 0.640), stdev = 0.004\n  CI (99.9%): [0.622, 0.649] (assumes normal distribution)\n\n\n# Run complete. Total time: 00:00:08\n\nREMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on\nwhy the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial\nexperiments, perform baseline and negative tests that provide experimental control, make sure\nthe benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.\nDo not assume the numbers tell you what you want them to tell.\n\nNOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise\nextra caution when trusting the results, look into the generated code to check the benchmark still\nworks, and factor in a small probability of new VM bugs. Additionally, while comparisons between\ndifferent JVMs are already problematic, the performance difference caused by different Blackhole\nmodes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.\n\nBenchmark                                   Mode  Cnt  Score   Error  Units\nPropertyResolverBenchmark.resolveTemplates  avgt    5  0.635 \u00b1 0.014  us/op\n\nBenchmark result is saved to /var/folders/22/g1sv634d11j1d_lqlnhz9p2r0000gn/T/tmpf3hxotmd.json\nWARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/jansi-2.4.1.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/guava-33.2.1-jre.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\nWARNING: Final field _cipher in class org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher has been mutated reflectively by class org.eclipse.sisu.bean.BeanPropertyField in unnamed module @475e586c (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/org.eclipse.sisu.inject-0.9.0.M3.jar)\nWARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning\nWARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n", "jmh_json_path": "assets/822b99df-docs-add-complexity-comment-to-resolve-n/run-1/jmh-results.json", "reused_from_sha": "", "profiles": [], "scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "score": 0.6353597250326037, "score_error": 0.013574725207737748, "unit": "us/op", "raw_data": [0.6378775532507702, 0.6341754435446897, 0.6314070109732165, 0.6400542295987736, 0.633284387795569]}]}], "latest_test": null, "latest_scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "mode": "avgt", "score": 0.6353597250326037, "score_error": 0.013574725207737748, "unit": "us/op", "params": null, "raw_data": [0.6378775532507702, 0.6341754435446897, 0.6314070109732165, 0.6400542295987736, 0.633284387795569]}]}, {"sha": "557f8cd997f1efd2c250c9dcc12bdff4bb99dd3c", "short_sha": "557f8cd9", "message": "Refactor: simplify resolve() to plain string concatenation", "author": "branch-bench@example.com", "ts": "2026-04-19 10:43", "runs": [{"run_index": 1, "run_at": "2026-04-19 10:45", "bench_cmd": "mvn -q package -DskipTests && java -jar target/benchmarks.jar -rf json -rff {out}", "test_cmd": "", "test": null, "bench_count": 1, "bench_output": "# JMH version: 1.37\n# VM version: JDK 26, OpenJDK 64-Bit Server VM, 26+35\n# VM invoker: /Users/jz/.sdkman/candidates/java/26-tem/bin/java\n# VM options: <none>\n# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)\n# Warmup: 3 iterations, 1 s each\n# Measurement: 5 iterations, 1 s each\n# Timeout: 10 min per iteration\n# Threads: 1 thread, will synchronize iterations\n# Benchmark mode: Average time, time/op\n# Benchmark: bench.PropertyResolverBenchmark.resolveTemplates\n\n# Run progress: 0.00% complete, ETA 00:00:08\n# Fork: 1 of 1\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n# Warmup Iteration   1: 1.712 us/op\n# Warmup Iteration   2: 1.151 us/op\n# Warmup Iteration   3: 1.169 us/op\nIteration   1: 1.155 us/op\nIteration   2: 1.157 us/op\nIteration   3: 1.149 us/op\nIteration   4: 1.147 us/op\nIteration   5: 1.148 us/op\n\n\nResult \"bench.PropertyResolverBenchmark.resolveTemplates\":\n  1.151 \u00b1(99.9%) 0.018 us/op [Average]\n  (min, avg, max) = (1.147, 1.151, 1.157), stdev = 0.005\n  CI (99.9%): [1.133, 1.169] (assumes normal distribution)\n\n\n# Run complete. Total time: 00:00:08\n\nREMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on\nwhy the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial\nexperiments, perform baseline and negative tests that provide experimental control, make sure\nthe benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.\nDo not assume the numbers tell you what you want them to tell.\n\nNOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise\nextra caution when trusting the results, look into the generated code to check the benchmark still\nworks, and factor in a small probability of new VM bugs. Additionally, while comparisons between\ndifferent JVMs are already problematic, the performance difference caused by different Blackhole\nmodes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.\n\nBenchmark                                   Mode  Cnt  Score   Error  Units\nPropertyResolverBenchmark.resolveTemplates  avgt    5  1.151 \u00b1 0.018  us/op\n\nBenchmark result is saved to /var/folders/22/g1sv634d11j1d_lqlnhz9p2r0000gn/T/tmpezdb1v5n.json\nWARNING: A restricted method in java.lang.System has been called\nWARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/jansi-2.4.1.jar)\nWARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module\nWARNING: Restricted methods will be blocked in a future release unless native access is enabled\n\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/guava-33.2.1-jre.jar)\nWARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\nWARNING: Final field _cipher in class org.sonatype.plexus.components.sec.dispatcher.DefaultSecDispatcher has been mutated reflectively by class org.eclipse.sisu.bean.BeanPropertyField in unnamed module @436a4e4b (file:/opt/homebrew/Cellar/maven/3.9.9/libexec/lib/org.eclipse.sisu.inject-0.9.0.M3.jar)\nWARNING: Use --enable-final-field-mutation=ALL-UNNAMED to avoid a warning\nWARNING: Mutating final fields will be blocked in a future release unless final field mutation is enabled\nWARNING: A terminally deprecated method in sun.misc.Unsafe has been called\nWARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/jz/code/branch-bench-sample/target/benchmarks.jar)\nWARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils\nWARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release\n", "jmh_json_path": "assets/557f8cd9-refactor-simplify-resolve-to-plain-strin/run-1/jmh-results.json", "reused_from_sha": "", "profiles": [], "scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "score": 1.1512244251644908, "score_error": 0.017785633524740805, "unit": "us/op", "raw_data": [1.1550240933372435, 1.1572389876565954, 1.1492042055989238, 1.1469607436153002, 1.1476940956143906]}]}], "latest_test": null, "latest_scores": [{"benchmark": "bench.PropertyResolverBenchmark.resolveTemplates", "mode": "avgt", "score": 1.1512244251644908, "score_error": 0.017785633524740805, "unit": "us/op", "params": null, "raw_data": [1.1550240933372435, 1.1572389876565954, 1.1492042055989238, 1.1469607436153002, 1.1476940956143906]}]}];
+const githubUrl = "https://github.com/retronym/branch-bench-sample";
+
+let _toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ── t-distribution 99% CI (two-tailed α=0.01) critical values ─────────────────
+function tValue99(df) {
+  if (df <= 0) return 63.657;
+  const tbl = [
+    [1,63.657],[2,9.925],[3,5.841],[4,4.604],[5,4.032],[6,3.707],[7,3.499],
+    [8,3.355],[9,3.250],[10,3.169],[15,2.947],[20,2.845],[30,2.750],
+    [60,2.660],[120,2.617],
+  ];
+  if (df >= 120) return 2.576;
+  for (let i = tbl.length - 1; i >= 0; i--) {
+    if (df >= tbl[i][0]) return tbl[i][1];
+  }
+  return 63.657;
+}
+
+function pooledStats(rawArrays) {
+  const all = rawArrays.flat();
+  if (all.length < 2) return null;
+  const n = all.length;
+  const mean = all.reduce((a, b) => a + b, 0) / n;
+  const variance = all.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1);
+  const stderr = Math.sqrt(variance / n);
+  return { mean, ci: tValue99(n - 1) * stderr, raw: all };
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+let chartMode = 'mean'; // 'mean' | 'min' | 'max' | 'raw'
+let runsMode  = 'latest'; // 'latest' | 'all' | 'aggregate' | 'run_N'
+const chartRenderers = []; // functions(errMode, runsMode)
+
+const palette = ['#388bfd','#3fb950','#d29922','#f85149','#bc8cff','#39d353'];
+const categoryArray = commits.map(c => c.message.substring(0, 40));
+const layout = (unit, mode_label) => ({
+  paper_bgcolor: '#161b22', plot_bgcolor: '#161b22',
+  font: { color: '#e6edf3', size: 11 },
+  margin: { t: 10, r: 20, b: 220, l: 70 },
+  xaxis: { tickangle: -55, gridcolor: '#21262d', color: '#8b949e', automargin: true,
+            categoryorder: 'array', categoryarray: categoryArray },
+  yaxis: { title: unit + ' (' + mode_label + ')', gridcolor: '#21262d', color: '#8b949e' },
+  legend: { bgcolor: 'transparent', font: { size: 10 } },
+  height: 520,
+});
+
+const xOrder = new Map(categoryArray.map((x, i) => [x, i]));
+function byCommitOrder(pts) {
+  return [...pts].sort((a, b) => (xOrder.get(a.x) ?? Infinity) - (xOrder.get(b.x) ?? Infinity));
+}
+
+function resolveRunGroups(bd, rMode) {
+  // Returns { label: string, pts: point[] }[]
+  if (rMode === 'all') {
+    const byIdx = {};
+    for (const pt of bd.points) {
+      (byIdx[pt.run_index] = byIdx[pt.run_index] || []).push(pt);
+    }
+    return Object.entries(byIdx).map(([ri, pts]) => ({
+      label: 'run ' + (parseInt(ri) + 1), pts: byCommitOrder(pts),
+    }));
+  }
+  if (rMode === 'latest') {
+    const latestBySha = {};
+    for (const pt of bd.points) {
+      if (!latestBySha[pt.sha] || pt.run_index > latestBySha[pt.sha].run_index)
+        latestBySha[pt.sha] = pt;
+    }
+    return [{ label: 'latest', pts: byCommitOrder(Object.values(latestBySha)) }];
+  }
+  if (rMode.startsWith('run_')) {
+    const target = parseInt(rMode.slice(4));
+    return [{ label: 'run ' + (target + 1), pts: byCommitOrder(bd.points.filter(p => p.run_index === target)) }];
+  }
+  if (rMode === 'aggregate') {
+    const bySha = {};
+    for (const pt of bd.points) {
+      (bySha[pt.sha] = bySha[pt.sha] || []).push(pt);
+    }
+    const aggPts = Object.values(bySha).map(pts => {
+      const stats = pooledStats(pts.map(p => p.raw || []));
+      const ref = pts[pts.length - 1];
+      if (stats) {
+        return { ...ref, y: stats.mean, error: stats.ci, raw: stats.raw };
+      }
+      const mean = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+      return { ...ref, y: mean, error: ref.error, raw: null };
+    });
+    return [{ label: 'aggregate', pts: byCommitOrder(aggPts) }];
+  }
+  return [{ label: 'all', pts: byCommitOrder(bd.points) }];
+}
+
+function buildTraces(bd, errMode, rMode) {
+  const groups = resolveRunGroups(bd, rMode);
+  const traces = [];
+  groups.forEach(({ label, pts }, gi) => {
+    const color = palette[gi % palette.length];
+    const hoverTmpl =
+      '<b>%{customdata[1]}</b> %{x}<br>%{y:.4f} ' + bd.unit + '<br>' +
+      '%{customdata[0]}<br>' +
+      '<i style="font-size:0.75em;color:#8b949e">click to copy SHA</i>' +
+      '<extra>' + label + '</extra>';
+
+    const hasRaw = pts.some(p => p.raw && p.raw.length > 0);
+
+    if (errMode === 'raw' && hasRaw) {
+      const bx = [], by = [];
+      for (const pt of pts) {
+        if (pt.raw) { for (const v of pt.raw) { bx.push(pt.x); by.push(v); } }
+        else { bx.push(pt.x); by.push(pt.y); }
+      }
+      traces.push({
+        name: label, x: bx, y: by,
+        type: 'box',
+        marker: { color, size: 5, opacity: 0.8 },
+        line: { color },
+        fillcolor: color + '22',
+        boxpoints: 'all', jitter: 0.4, pointpos: 0,
+        boxmean: true, whiskerwidth: 0.6,
+        hovertemplate: '%{x}<br>%{y:.4f} ' + bd.unit + '<extra>' + label + '</extra>',
+      });
+      return;
+    }
+
+    let error_y;
+    if (errMode === 'min' && hasRaw) {
+      error_y = {
+        type: 'data', symmetric: false, visible: true, color: color + '88',
+        array:      pts.map(() => 0),
+        arrayminus: pts.map(p => p.raw ? p.y - Math.min(...p.raw) : p.error),
+      };
+    } else if (errMode === 'max' && hasRaw) {
+      error_y = {
+        type: 'data', symmetric: false, visible: true, color: color + '88',
+        array:      pts.map(p => p.raw ? Math.max(...p.raw) - p.y : p.error),
+        arrayminus: pts.map(() => 0),
+      };
+    } else {
+      error_y = { type: 'data', array: pts.map(p => p.error), visible: true, color: color + '88' };
+    }
+
+    traces.push({
+      name: label,
+      x: pts.map(p => p.x), y: pts.map(p => p.y),
+      error_y,
+      customdata: pts.map(p => [p.run_at, p.short_sha]),
+      type: 'scatter', mode: 'lines+markers',
+      marker: { color, size: 7 },
+      line: { color, dash: gi === 0 ? 'solid' : 'dot' },
+      hovertemplate: hoverTmpl,
+    });
+  });
+  return traces;
+}
+
+const chartsDiv = document.getElementById('charts');
+for (const [name, bd] of Object.entries(benchData)) {
+  const card = document.createElement('div');
+  card.className = 'chart-card';
+  const title = document.createElement('p');
+  title.className = 'chart-title';
+  title.textContent = name;
+  card.appendChild(title);
+  const plotDiv = document.createElement('div');
+  card.appendChild(plotDiv);
+  chartsDiv.appendChild(card);
+
+  const render = (eMode, rMode) => {
+    Plotly.react(plotDiv, buildTraces(bd, eMode, rMode), layout(bd.unit, bd.mode), {responsive: true});
+    plotDiv.removeAllListeners?.('plotly_click');
+    plotDiv.on('plotly_click', data => {
+      const pt = data.points[0];
+      const sha = pt.customdata?.[1];
+      if (!sha) return;
+      navigator.clipboard.writeText(sha).then(() => showToast('Copied ' + sha));
+    });
+  };
+  chartRenderers.push(render);
+  render(chartMode, runsMode);
+}
+
+// Populate "Run N" options in the dropdown
+(function() {
+  const maxIdx = Math.max(-1, ...Object.values(benchData).flatMap(bd => bd.points.map(p => p.run_index)));
+  const sel = document.getElementById('runs-mode');
+  for (let i = 0; i <= maxIdx; i++) {
+    const opt = document.createElement('option');
+    opt.value = 'run_' + i;
+    opt.textContent = 'Run ' + (i + 1);
+    sel.appendChild(opt);
+  }
+})();
+
+function setChartMode(mode) {
+  chartMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  chartRenderers.forEach(r => r(mode, runsMode));
+}
+
+function setRunsMode(val) {
+  runsMode = val;
+  chartRenderers.forEach(r => r(chartMode, runsMode));
+  scoreUpdaters.forEach(fn => fn());
+}
+
+// ── Score cell rendering (runs-mode aware) ────────────────────────────────────
+const scoreUpdaters = [];
+
+function renderScoreCell(td, c) {
+  let scores;
+  if (runsMode === 'all' || runsMode === 'latest') {
+    scores = c.runs.length > 0 ? c.runs[c.runs.length - 1].scores : [];
+  } else if (runsMode.startsWith('run_')) {
+    const ri = parseInt(runsMode.slice(4));
+    scores = ri < c.runs.length ? c.runs[ri].scores : [];
+  } else if (runsMode === 'aggregate') {
+    const byBench = {};
+    for (const run of c.runs) {
+      for (const s of run.scores) {
+        (byBench[s.benchmark] = byBench[s.benchmark] || []).push(s);
+      }
+    }
+    scores = Object.entries(byBench).map(([benchmark, arr]) => {
+      const stats = pooledStats(arr.map(s => s.raw_data || []));
+      if (stats) return { benchmark, score: stats.mean, score_error: stats.ci, unit: arr[0].unit };
+      const mean = arr.reduce((a, s) => a + s.score, 0) / arr.length;
+      return { benchmark, score: mean, score_error: null, unit: arr[0].unit };
+    });
+  } else {
+    scores = [];
+  }
+
+  if (!scores || scores.length === 0) {
+    td.innerHTML = '<span class="na">—</span>';
+    return;
+  }
+  td.innerHTML = scores.map(s => {
+    const scoreStr = s.score.toPrecision(6);
+    const err = s.score_error != null
+      ? ` <span class="score-err">± ${s.score_error.toPrecision(3)}</span>` : '';
+    const unit = `<span class="score-unit">${esc(s.unit)}</span>`;
+    return `<div class="score" title="${esc(s.benchmark)}">${scoreStr}${err} ${unit}</div>`;
+  }).join('');
+}
+
+// ── Commit table ──────────────────────────────────────────────────────────────
+const PROFILE_META = {
+  'cpu-forward':   { label: 'cpu (forward)',   tip: 'CPU flamegraph: roots at bottom, hot leaves at top. Shows what your code calls.' },
+  'cpu-reverse':   { label: 'cpu (reverse)',   tip: 'CPU flamegraph, reversed (icicle): roots at top. Shows what calls your hot code — useful for finding unexpected callers.' },
+  'alloc-forward': { label: 'alloc (forward)', tip: 'Allocation flamegraph: call stacks responsible for heap allocations.' },
+  'alloc-reverse': { label: 'alloc (reverse)', tip: 'Allocation flamegraph, reversed: shows callers of allocating methods.' },
+  'wall-forward':  { label: 'wall (forward)',  tip: 'Wall-clock flamegraph: includes blocked/waiting time, not just on-CPU time.' },
+  'wall-reverse':  { label: 'wall (reverse)',  tip: 'Wall-clock flamegraph, reversed.' },
+  'lock-forward':  { label: 'lock (forward)',  tip: 'Lock-contention flamegraph: call stacks holding or waiting on monitors.' },
+  'lock-reverse':  { label: 'lock (reverse)',  tip: 'Lock-contention flamegraph, reversed.' },
+  'cpu':   { label: 'cpu',   tip: 'CPU flamegraph.' },
+  'alloc': { label: 'alloc', tip: 'Allocation flamegraph.' },
+  'wall':  { label: 'wall',  tip: 'Wall-clock flamegraph.' },
+  'lock':  { label: 'lock',  tip: 'Lock-contention flamegraph.' },
+};
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function expandedShas() {
+  return new Set(location.hash.slice(1).split(',').filter(Boolean));
+}
+
+function pushHash(shas) {
+  const hash = shas.size ? '#' + [...shas].join(',') : ' ';
+  history.pushState(null, '', hash);
+}
+
+const tbody = document.getElementById('tbody');
+const rowBySha = {};
+
+for (const c of commits) {
+  const runCount = c.runs.length;
+  const isPending = runCount === 0;
+  const commitTr = document.createElement('tr');
+  commitTr.className = 'commit-row' + (isPending ? ' pending' : '');
+  commitTr.id = 'commit-' + c.short_sha;
+
+  // Test cell
+  let testCell = '<span class="na">—</span>';
+  if (c.latest_test !== null && c.latest_test !== undefined) {
+    testCell = c.latest_test.passed
+      ? '<span class="pass">✓</span>'
+      : '<span class="fail">✗</span>';
+  }
+
+  const runLabel = isPending
+    ? '<span class="na">pending</span>'
+    : `${runCount} run${runCount !== 1 ? 's' : ''} <span class="toggle">[expand]</span>`;
+
+  const shaHtml = githubUrl
+    ? `<a href="${githubUrl}/commit/${esc(c.sha)}" target="_blank" rel="noopener"
+          title="View diff on GitHub" style="font-family:monospace;font-size:0.78rem"
+          onclick="event.stopPropagation()">${esc(c.short_sha)}</a>`
+    : `<code style="font-size:0.78rem">${esc(c.short_sha)}</code>`;
+  commitTr.innerHTML = `
+    <td>${shaHtml}</td>
+    <td>${esc(c.message.substring(0, 72))}</td>
+    <td style="white-space:nowrap">${esc(c.ts)}</td>
+    <td>${testCell}</td>
+    <td></td>
+    <td>${runLabel}</td>
+  `;
+  tbody.appendChild(commitTr);
+
+  // Score cell — populated dynamically via scoreUpdaters
+  const scoreTd = commitTr.cells[4];
+  renderScoreCell(scoreTd, c);
+  scoreUpdaters.push(() => renderScoreCell(scoreTd, c));
+
+  const runRows = [];
+  for (const r of c.runs) {
+    const testStatus = r.test === null
+      ? '<span class="na">—</span>'
+      : r.test.passed
+        ? '<span class="pass">✓ pass</span>'
+        : '<span class="fail">✗ fail</span>';
+
+    const profileLinks = r.profiles.length
+      ? r.profiles.map(p => {
+          const meta = PROFILE_META[p.event] || { label: p.event, tip: '' };
+          return `<a href="${esc(p.file_path)}" title="${esc(meta.tip)}">${esc(meta.label)}</a>`;
+        }).join(' ')
+      : '';
+    const jmhLink = r.jmh_json_path
+      ? `<a href="${esc(r.jmh_json_path)}" title="Raw JMH JSON">jmh.json</a>`
+      : '';
+
+    const testOutputBlock = (r.test && r.test.output)
+      ? `<details><summary>test output</summary><pre class="output">${esc(r.test.output)}</pre></details>`
+      : '';
+
+    const benchOutputBlock = r.bench_output
+      ? `<details><summary>bench output</summary><pre class="output">${esc(r.bench_output)}</pre></details>`
+      : '';
+
+    const reusedBadge = r.reused_from_sha
+      ? ` &nbsp;<span style="color:#8b949e;font-size:0.72rem" title="Results copied from identical tree">≡ ${esc(r.reused_from_sha)}</span>`
+      : '';
+
+    const tr = document.createElement('tr');
+    tr.className = 'run-row hidden';
+    tr.innerHTML = `
+      <td colspan="3">
+        <div class="run-meta">Run #${r.run_index} &nbsp;·&nbsp; ${esc(r.run_at)}${reusedBadge}</div>
+        ${r.test_cmd ? '<div class="cmd">test: ' + esc(r.test_cmd) + '</div>' : ''}
+        ${r.bench_cmd ? '<div class="cmd">bench: ' + esc(r.bench_cmd) + '</div>' : ''}
+        ${testOutputBlock}
+        ${benchOutputBlock}
+      </td>
+      <td>${testStatus}</td>
+      <td>${r.bench_count > 0 ? r.bench_count + ' result(s)' : '<span class="na">—</span>'}</td>
+      <td>${[profileLinks, jmhLink].filter(Boolean).join(' ')}</td>
+    `;
+    tbody.appendChild(tr);
+    runRows.push(tr);
+  }
+
+  function setExpanded(expanded) {
+    runRows.forEach(tr => tr.classList.toggle('hidden', !expanded));
+    const toggle = commitTr.querySelector('.toggle');
+    if (toggle) toggle.textContent = expanded ? '[collapse]' : '[expand]';
+  }
+
+  rowBySha[c.short_sha] = setExpanded;
+
+  commitTr.addEventListener('click', () => {
+    // Don't toggle when the user is selecting text (e.g. copying the SHA)
+    if (window.getSelection()?.toString()) return;
+    const expanding = runRows[0]?.classList.contains('hidden');
+    setExpanded(expanding);
+    const shas = expandedShas();
+    expanding ? shas.add(c.short_sha) : shas.delete(c.short_sha);
+    pushHash(shas);
+    if (expanding) commitTr.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+// Restore expanded state from URL hash (including on back-navigation)
+function applyHash() {
+  const shas = expandedShas();
+  for (const [sha, fn] of Object.entries(rowBySha)) fn(shas.has(sha));
+  if (shas.size) {
+    const first = document.getElementById('commit-' + [...shas][0]);
+    if (first) first.scrollIntoView({ block: 'center' });
+  }
+}
+applyHash();
+window.addEventListener('popstate', applyHash);
+</script>
+</body>
+</html>
