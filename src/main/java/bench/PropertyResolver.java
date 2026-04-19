@@ -7,6 +7,10 @@ import java.util.Map;
  *
  * Micro-opt: convert input to char[] once upfront to avoid repeated charAt()
  * bounds-check overhead on every character access.
+ *
+ * Complexity: O(n * k) where n = input length, k = number of properties.
+ * Each character is visited at most twice (once during scan, once copied into
+ * the StringBuilder), so the constant factor is small.
  */
 public class PropertyResolver {
 
